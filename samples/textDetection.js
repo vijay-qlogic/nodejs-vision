@@ -15,10 +15,9 @@
 
 'use strict';
 
-const async = require('async');
 const fs = require('fs');
 const path = require('path');
-
+const {promisify} = require('util');
 // By default, the client will authenticate using the service account file
 // specified by the GOOGLE_APPLICATION_CREDENTIALS environment variable and use
 // the project specified by the GCLOUD_PROJECT environment variable. See
@@ -78,7 +77,7 @@ Index.prototype.add = function(filename, document, callback) {
     self.tokenClient.set(filename, document, cb);
   });
 
-  async.parallel(tasks, callback);
+  Promise.all(tasks).then(callback);
 };
 
 Index.prototype.lookup = function(words, callback) {
@@ -89,7 +88,7 @@ Index.prototype.lookup = function(words, callback) {
       self.tokenClient.smembers(word, cb);
     };
   });
-  async.parallel(tasks, callback);
+  Promise.all(tasks).then(callback);
 };
 
 Index.prototype.documentIsProcessed = function(filename, callback) {
@@ -176,90 +175,62 @@ function getTextFromFiles(index, inputFiles, callback) {
           extractDescriptions(filename, index, response, cb);
         });
       });
-      async.parallel(tasks, function(err) {
-        if (err) {
-          return callback(err);
-        }
-        callback(null, textResponse);
-      });
+      Promise.all(tasks).then(textResponse => callback(null, textResponse));
     })
     .catch(callback);
 }
 
 // Run the example
-function main(inputDir) {
-  return new Promise((resolve, reject) => {
-    const index = new Index();
+async function main(inputDir) {
+  const index = new Index();
 
-    async.waterfall(
-      [
-        // Scan the specified directory for files
-        function(cb) {
-          fs.readdir(inputDir, cb);
-        },
-        // Separate directories from files
-        function(files, cb) {
-          async.parallel(
-            files.map(function(file) {
-              const filename = path.join(inputDir, file);
-              return function(cb) {
-                fs.stat(filename, function(err, stats) {
-                  if (err) {
-                    return cb(err);
-                  }
-                  if (!stats.isDirectory()) {
-                    return cb(null, filename);
-                  }
-                  cb();
-                });
-              };
-            }),
-            cb
-          );
-        },
-        // Figure out which files have already been processed
-        function(allImageFiles, cb) {
-          const tasks = allImageFiles
-            .filter(function(filename) {
-              return filename;
-            })
-            .map(function(filename) {
-              return function(cb) {
-                index.documentIsProcessed(filename, function(err, processed) {
-                  if (err) {
-                    return cb(err);
-                  }
-                  if (!processed) {
-                    // Forward this filename on for further processing
-                    return cb(null, filename);
-                  }
-                  cb();
-                });
-              };
-            });
-          async.parallel(tasks, cb);
-        },
-        // Analyze any remaining unprocessed files
-        function(imageFilesToProcess, cb) {
-          imageFilesToProcess = imageFilesToProcess.filter(function(filename) {
-            return filename;
-          });
-          if (imageFilesToProcess.length) {
-            return getTextFromFiles(index, imageFilesToProcess, cb);
-          }
-          console.log('All files processed!');
-          cb();
-        },
-      ],
-      function(err, result) {
-        index.quit();
-        if (err) {
-          return reject(err);
-        }
-        resolve(result);
+  // Scan the specified directory for files
+  const files = fs.readdirSync(inputDir);
+
+  // Separate directories from files
+  const allImageFiles = await Promise.all(
+    files.map(file => {
+      const filename = path.join(inputDir, file);
+      const stats = fs.statSync(filename);
+      if (!stats.isDirectory()) {
+        return filename;
       }
-    );
+    })
+  );
+
+  // Figure out which files have already been processed
+  const tasks = await Promise.all(
+    allImageFiles
+      .filter(filename => {
+        return filename;
+      })
+      .map(filename => {
+        return function(cb) {
+          index.documentIsProcessed(filename, (err, processed) => {
+            if (err) {
+              return cb(err);
+            }
+            if (!processed) {
+              // Forward this filename on for further processing
+              return cb(null, filename);
+            }
+            cb();
+          });
+        };
+      })
+  );
+
+  let imageFilesToProcess = await Promise.all(tasks);
+
+  // Analyze any remaining unprocessed files
+  imageFilesToProcess = imageFilesToProcess.filter(filename => {
+    return filename;
   });
+  if (imageFilesToProcess.length) {
+    return await promisify(getTextFromFiles)(index, imageFilesToProcess);
+  }
+
+  index.quit();
 }
 
 if (module === require.main) {

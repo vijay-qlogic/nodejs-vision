@@ -21,12 +21,12 @@ const {promisify} = require('util');
 // By default, the client will authenticate using the service account file
 // specified by the GOOGLE_APPLICATION_CREDENTIALS environment variable and use
 // the project specified by the GCLOUD_PROJECT environment variable. See
-// https://googlecloudplatform.github.io/gcloud-node/#/docs/google-cloud/latest/guides/authentication
+// https://cloud.google.com/docs/authentication/getting-started
 const vision = require('@google-cloud/vision');
 const natural = require('natural');
 const redis = require('redis');
 
-// Instantiate a vision client
+// Instantiate a vision client.
 const client = new vision.ImageAnnotatorClient();
 
 function Index() {
@@ -57,7 +57,7 @@ Index.prototype.quit = function() {
   this.docsClient.quit();
 };
 
-Index.prototype.add = function(filename, document, callback) {
+Index.prototype.add = async (filename, document) => {
   const self = this;
   const PUNCTUATION = ['.', ',', ':', ''];
   const tokenizer = new natural.WordTokenizer();
@@ -77,10 +77,10 @@ Index.prototype.add = function(filename, document, callback) {
     self.tokenClient.set(filename, document, cb);
   });
 
-  Promise.all(tasks).then(callback);
+  return Promise.all(tasks);
 };
 
-Index.prototype.lookup = function(words, callback) {
+Index.prototype.lookup = async words => {
   const self = this;
   const tasks = words.map(function(word) {
     word = word.toLowerCase();
@@ -88,7 +88,7 @@ Index.prototype.lookup = function(words, callback) {
       self.tokenClient.smembers(word, cb);
     };
   });
-  Promise.all(tasks).then(callback);
+  return Promise.all(tasks);
 };
 
 Index.prototype.documentIsProcessed = function(filename, callback) {
@@ -146,7 +146,7 @@ function extractDescriptions(filename, index, response, callback) {
 }
 
 function getTextFromFiles(index, inputFiles, callback) {
-  // Make a call to the Vision API to detect text
+  // Make a call to the Vision API to detect text.
   const requests = [];
   inputFiles.forEach(filename => {
     const request = {
@@ -180,14 +180,14 @@ function getTextFromFiles(index, inputFiles, callback) {
     .catch(callback);
 }
 
-// Run the example
+// Run the example.
 async function main(inputDir) {
   const index = new Index();
 
-  // Scan the specified directory for files
+  // Scan the specified directory for files.
   const files = fs.readdirSync(inputDir);
 
-  // Separate directories from files
+  // Separate directories from files.
   const allImageFiles = await Promise.all(
     files.map(file => {
       const filename = path.join(inputDir, file);
@@ -198,7 +198,7 @@ async function main(inputDir) {
     })
   );
 
-  // Figure out which files have already been processed
+  // Figure out which files have already been processed.
   const tasks = await Promise.all(
     allImageFiles
       .filter(filename => {
@@ -211,7 +211,7 @@ async function main(inputDir) {
               return cb(err);
             }
             if (!processed) {
-              // Forward this filename on for further processing
+              // Forward this filename on for further processing.
               return cb(null, filename);
             }
             cb();
@@ -222,7 +222,7 @@ async function main(inputDir) {
 
   let imageFilesToProcess = await Promise.all(tasks);
 
-  // Analyze any remaining unprocessed files
+  // Analyze any remaining unprocessed files.
   imageFilesToProcess = imageFilesToProcess.filter(filename => {
     return filename;
   });
